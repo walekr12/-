@@ -223,8 +223,8 @@
           </div>
         </div>
 
-        <!-- 分页 -->
-        <div v-if="totalPages > 1" class="pagination p-4 border-t border-cyber-blue/20 flex items-center justify-center gap-2">
+        <!-- 分页 - 始终显示，只要有数据 -->
+        <div v-if="displayItems.length > 0" class="pagination p-4 border-t border-cyber-blue/20 flex items-center justify-center gap-2">
           <button @click="currentPage = 1" :disabled="currentPage === 1" class="cyber-btn text-sm px-3">
             «
           </button>
@@ -431,12 +431,14 @@ export default {
   
   watch: {
     currentPage() {
-      // 翻页时加载新页面的缩略图
-      this.$nextTick(() => this.loadVisibleThumbnails())
+      // 翻页时加载新页面的缩略图（如果没有设置跳过标记）
+      if (!this._skipThumbnailLoad) {
+        this.$nextTick(() => this.loadMissingThumbnailsForCurrentPage())
+      }
     },
     pageSize() {
       this.currentPage = 1
-      this.$nextTick(() => this.loadVisibleThumbnails())
+      this.$nextTick(() => this.loadMissingThumbnailsForCurrentPage())
     }
   },
   
@@ -501,6 +503,24 @@ export default {
       }
     },
     
+    // 只加载当前页面中缺少缩略图的项目（不重新加载已有缩略图）
+    async loadMissingThumbnailsForCurrentPage() {
+      // 只找出当前页面中没有缩略图数据的项目
+      const itemsToLoad = this.pagedItems.filter(item => !item.thumbnailData && !item.thumbnailFailed)
+      
+      if (itemsToLoad.length === 0) return
+      
+      const batchSize = 4
+      
+      for (let i = 0; i < itemsToLoad.length; i += batchSize) {
+        const batch = itemsToLoad.slice(i, i + batchSize)
+        
+        await Promise.all(batch.map(async (item) => {
+          await this.loadThumbnailWithRetry(item, 3) // 重试3次
+        }))
+      }
+    },
+    
     // 带重试的缩略图加载
     async loadThumbnailWithRetry(item, maxRetries = 5, delay = 1000) {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -557,7 +577,14 @@ export default {
         this.selectedTag = null
       } else {
         this.selectedTag = tag
+        // 使用标记避免触发不必要的缩略图加载
+        this._skipThumbnailLoad = true
         this.currentPage = 1
+        this.$nextTick(() => {
+          this._skipThumbnailLoad = false
+          // 只加载筛选后确实缺少缩略图的项目
+          this.loadMissingThumbnailsForCurrentPage()
+        })
       }
     },
     

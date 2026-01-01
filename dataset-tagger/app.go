@@ -422,15 +422,30 @@ func (a *App) GetThumbnail(mediaPath string, isVideo bool) string {
 
 // generateImageThumbnail creates a thumbnail for an image
 func (a *App) generateImageThumbnail(imagePath, cachePath string) []byte {
+	// 检查文件是否存在
+	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		fmt.Printf("图片文件不存在: %s\n", imagePath)
+		return nil
+	}
+
 	file, err := os.Open(imagePath)
 	if err != nil {
+		fmt.Printf("打开图片失败 [%s]: %v\n", imagePath, err)
 		return nil
 	}
 	defer file.Close()
 
-	img, _, err := image.Decode(file)
+	// 尝试解码图片
+	img, format, err := image.Decode(file)
 	if err != nil {
-		return nil
+		fmt.Printf("解码图片失败 [%s] (格式: %s): %v\n", imagePath, format, err)
+		// 尝试重新打开并使用JPEG解码
+		file.Seek(0, 0)
+		img, err = jpeg.Decode(file)
+		if err != nil {
+			fmt.Printf("JPEG解码也失败 [%s]: %v\n", imagePath, err)
+			return nil
+		}
 	}
 
 	// Resize to max 300px width
@@ -439,14 +454,22 @@ func (a *App) generateImageThumbnail(imagePath, cachePath string) []byte {
 	// Save to cache
 	out, err := os.Create(cachePath)
 	if err != nil {
+		fmt.Printf("创建缓存文件失败 [%s]: %v\n", cachePath, err)
 		return nil
 	}
 	defer out.Close()
 
-	jpeg.Encode(out, thumb, &jpeg.Options{Quality: 85})
+	if err := jpeg.Encode(out, thumb, &jpeg.Options{Quality: 85}); err != nil {
+		fmt.Printf("编码缩略图失败 [%s]: %v\n", imagePath, err)
+		return nil
+	}
 
 	// Read back
-	data, _ := os.ReadFile(cachePath)
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		fmt.Printf("读取缓存失败 [%s]: %v\n", cachePath, err)
+		return nil
+	}
 	return data
 }
 
