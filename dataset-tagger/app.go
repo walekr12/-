@@ -19,6 +19,9 @@ import (
 
 	_ "image/gif"
 	_ "image/png"
+
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/webp"
 )
 
 // App struct
@@ -332,33 +335,59 @@ func (a *App) analyzeCommonPhrases() []TagInfo {
 }
 
 // filterSubPhrases 过滤掉被更长短语包含的短子串
+// 核心原则：最长匹配优先，只有当短子串完全被更长短语覆盖时才过滤
+// 例如："正面视角"和"侧面视角"不应该被合并成"面视角"
 func (a *App) filterSubPhrases(phrases []TagInfo) []TagInfo {
 	if len(phrases) == 0 {
 		return phrases
 	}
 
+	// 先按长度从长到短排序，同长度按count排序
+	sort.Slice(phrases, func(i, j int) bool {
+		lenI := len([]rune(phrases[i].Tag))
+		lenJ := len([]rune(phrases[j].Tag))
+		if lenI != lenJ {
+			return lenI > lenJ // 长的优先
+		}
+		return phrases[i].Count > phrases[j].Count
+	})
+
 	result := make([]TagInfo, 0)
+	removed := make(map[string]bool)
 
-	for i, phrase := range phrases {
-		isSubPhrase := false
+	// 从最长的开始，标记被包含的短子串
+	for _, phrase := range phrases {
+		if removed[phrase.Tag] {
+			continue
+		}
 
-		// 检查是否被前面（更高优先级）的短语包含
-		for j := 0; j < i && j < len(result); j++ {
-			if strings.Contains(result[j].Tag, phrase.Tag) && result[j].Count == phrase.Count {
-				isSubPhrase = true
-				break
+		result = append(result, phrase)
+
+		// 标记所有被当前短语完全包含且count相同的更短子串
+		for _, other := range phrases {
+			if other.Tag == phrase.Tag {
+				continue
+			}
+			// 只有当短子串被完全包含，且count完全相同时才过滤
+			// 这样"正面视角"(count=5)和"侧面视角"(count=3)都会保留
+			// 因为它们的count不同，即使都包含"面视角"
+			if strings.Contains(phrase.Tag, other.Tag) && phrase.Count == other.Count {
+				removed[other.Tag] = true
 			}
 		}
 
-		if !isSubPhrase {
-			result = append(result, phrase)
-		}
-
-		// 限制检查范围避免性能问题
 		if len(result) >= 100 {
 			break
 		}
 	}
+
+	// 按count重新排序
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Count != result[j].Count {
+			return result[i].Count > result[j].Count
+		}
+		return len([]rune(result[i].Tag)) > len([]rune(result[j].Tag))
+	})
 
 	return result
 }
