@@ -169,22 +169,8 @@ func (a *App) ScanFolder(folderPath string) ScanResult {
 		a.items = append(a.items, item)
 	}
 
-	// Sort tags by frequency - only include tags that appear in more than 1 file (common tags)
-	tagInfos := make([]TagInfo, 0, len(a.tagFrequency))
-	for tag, count := range a.tagFrequency {
-		// 只统计出现在2个以上文件中的共同标签
-		if count >= 2 {
-			tagInfos = append(tagInfos, TagInfo{Tag: tag, Count: count})
-		}
-	}
-	sort.Slice(tagInfos, func(i, j int) bool {
-		return tagInfos[i].Count > tagInfos[j].Count
-	})
-
-	// 限制返回前100个最常见标签
-	if len(tagInfos) > 100 {
-		tagInfos = tagInfos[:100]
-	}
+	// 分析共同短语（子串频率统计）
+	tagInfos := a.analyzeCommonPhrases()
 
 	return ScanResult{
 		Success:     true,
@@ -197,7 +183,7 @@ func (a *App) ScanFolder(folderPath string) ScanResult {
 	}
 }
 
-// parseTags splits tag string into individual tags
+// parseTags splits tag string into individual tags (for display/edit)
 func (a *App) parseTags(content string) []string {
 	// Common separators: comma, newline
 	content = strings.ReplaceAll(content, "\r\n", ",")
@@ -214,6 +200,121 @@ func (a *App) parseTags(content string) []string {
 	}
 
 	return tags
+}
+
+// extractSubstrings 提取文本中所有长度在minLen到maxLen之间的子串
+func (a *App) extractSubstrings(content string, minLen, maxLen int) map[string]bool {
+	substrings := make(map[string]bool)
+	runes := []rune(content)
+	length := len(runes)
+
+	for i := 0; i < length; i++ {
+		for l := minLen; l <= maxLen && i+l <= length; l++ {
+			sub := string(runes[i : i+l])
+			// 过滤掉纯空白和纯标点的子串
+			sub = strings.TrimSpace(sub)
+			if len(sub) > 0 && !a.isPunctuation(sub) {
+				substrings[sub] = true
+			}
+		}
+	}
+	return substrings
+}
+
+// isPunctuation 检查字符串是否只包含标点符号
+func (a *App) isPunctuation(s string) bool {
+	punctuation := `,.!?;:，。！？；：、""''「」【】（）()[]{}《》<>-_—·… ` + "\n\r\t"
+	for _, r := range s {
+		if !strings.ContainsRune(punctuation, r) {
+			return false
+		}
+	}
+	return true
+}
+
+// analyzeCommonPhrases 分析所有文件中的共同短语
+func (a *App) analyzeCommonPhrases() []TagInfo {
+	// 存储每个子串出现在哪些文件中
+	phraseFileCount := make(map[string]int)
+	// 存储每个子串的总出现次数
+	phraseFrequency := make(map[string]int)
+
+	// 遍历所有文件，提取子串
+	for _, item := range a.items {
+		if item.RawTags == "" {
+			continue
+		}
+		// 提取这个文件中的所有子串（长度2-15个字符）
+		substrings := a.extractSubstrings(item.RawTags, 2, 15)
+
+		// 统计每个子串出现在多少个文件中
+		for sub := range substrings {
+			phraseFileCount[sub]++
+			phraseFrequency[sub]++
+		}
+	}
+
+	// 只保留出现在2个或以上文件中的短语（真正的共同短语）
+	commonPhrases := make([]TagInfo, 0)
+	for phrase, fileCount := range phraseFileCount {
+		if fileCount >= 2 {
+			commonPhrases = append(commonPhrases, TagInfo{
+				Tag:   phrase,
+				Count: fileCount,
+			})
+		}
+	}
+
+	// 按出现文件数排序，相同则按长度排序（优先显示更长的短语）
+	sort.Slice(commonPhrases, func(i, j int) bool {
+		if commonPhrases[i].Count != commonPhrases[j].Count {
+			return commonPhrases[i].Count > commonPhrases[j].Count
+		}
+		// 优先显示更长的短语（更有意义）
+		return len([]rune(commonPhrases[i].Tag)) > len([]rune(commonPhrases[j].Tag))
+	})
+
+	// 过滤掉被更长短语包含的短子串
+	filteredPhrases := a.filterSubPhrases(commonPhrases)
+
+	// 限制返回前100个
+	if len(filteredPhrases) > 100 {
+		filteredPhrases = filteredPhrases[:100]
+	}
+
+	return filteredPhrases
+}
+
+// filterSubPhrases 过滤掉被更长短语包含的短子串
+func (a *App) filterSubPhrases(phrases []TagInfo) []TagInfo {
+	if len(phrases) == 0 {
+		return phrases
+	}
+
+	result := make([]TagInfo, 0)
+
+	for i, phrase := range phrases {
+		isSubPhrase := false
+
+		// 检查是否被前面（更高优先级）的短语包含
+		for j := 0; j < i && j < len(result); j++ {
+			if strings.Contains(result[j].Tag, phrase.Tag) && result[j].Count == phrase.Count {
+				isSubPhrase = true
+				break
+			}
+		}
+
+		if !isSubPhrase {
+			result = append(result, phrase)
+		}
+
+		// 限制检查范围避免性能问题
+		if len(result) >= 100 {
+			break
+		}
+	}
+
+	return result
 }
 
 // GetThumbnail generates and returns thumbnail as base64
@@ -441,15 +542,13 @@ func (a *App) GetItems() []DatasetItem {
 	return a.items
 }
 
-// FilterByTag returns items containing a specific tag
+// FilterByTag returns items containing a specific tag/phrase (substring match)
 func (a *App) FilterByTag(tag string) []DatasetItem {
 	result := make([]DatasetItem, 0)
 	for _, item := range a.items {
-		for _, t := range item.Tags {
-			if t == tag {
-				result = append(result, item)
-				break
-			}
+		// 使用子串匹配，因为标签现在是共同短语
+		if strings.Contains(item.RawTags, tag) {
+			result = append(result, item)
 		}
 	}
 	return result
