@@ -202,23 +202,69 @@ func (a *App) parseTags(content string) []string {
 	return tags
 }
 
-// extractSubstrings 提取文本中所有长度在minLen到maxLen之间的子串
+// extractSubstrings 提取文本中所有长度在minLen到maxLen之间的纯净子串（不含标点）
 func (a *App) extractSubstrings(content string, minLen, maxLen int) map[string]bool {
 	substrings := make(map[string]bool)
-	runes := []rune(content)
-	length := len(runes)
 
-	for i := 0; i < length; i++ {
-		for l := minLen; l <= maxLen && i+l <= length; l++ {
-			sub := string(runes[i : i+l])
-			// 过滤掉纯空白和纯标点的子串
-			sub = strings.TrimSpace(sub)
-			if len(sub) > 0 && !a.isPunctuation(sub) {
-				substrings[sub] = true
+	// 先按标点符号分割文本
+	segments := a.splitByPunctuation(content)
+
+	for _, segment := range segments {
+		segment = strings.TrimSpace(segment)
+		if len(segment) == 0 {
+			continue
+		}
+
+		runes := []rune(segment)
+		length := len(runes)
+
+		for i := 0; i < length; i++ {
+			for l := minLen; l <= maxLen && i+l <= length; l++ {
+				sub := string(runes[i : i+l])
+				sub = strings.TrimSpace(sub)
+				// 确保子串不为空且不含任何标点符号
+				if len(sub) > 0 && !a.containsPunctuation(sub) {
+					substrings[sub] = true
+				}
 			}
 		}
 	}
 	return substrings
+}
+
+// splitByPunctuation 按标点符号分割文本
+func (a *App) splitByPunctuation(s string) []string {
+	punctuation := `,.!?;:，。！？；：、""''「」【】（）()[]{}《》<>-_—·…` + "\n\r\t "
+	result := make([]string, 0)
+	current := strings.Builder{}
+
+	for _, r := range s {
+		if strings.ContainsRune(punctuation, r) {
+			if current.Len() > 0 {
+				result = append(result, current.String())
+				current.Reset()
+			}
+		} else {
+			current.WriteRune(r)
+		}
+	}
+
+	if current.Len() > 0 {
+		result = append(result, current.String())
+	}
+
+	return result
+}
+
+// containsPunctuation 检查字符串是否包含任何标点符号
+func (a *App) containsPunctuation(s string) bool {
+	punctuation := `,.!?;:，。！？；：、""''「」【】（）()[]{}《》<>-_—·…` + "\n\r\t "
+	for _, r := range s {
+		if strings.ContainsRune(punctuation, r) {
+			return true
+		}
+	}
+	return false
 }
 
 // isPunctuation 检查字符串是否只包含标点符号

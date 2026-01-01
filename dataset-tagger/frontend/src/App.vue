@@ -192,15 +192,9 @@
                   ></textarea>
                 </div>
                 <div v-else @click.stop="startEditCard(item)" class="cursor-text h-full">
-                  <div v-if="item.tags.length > 0" class="flex flex-wrap gap-1">
-                    <span v-for="(tag, idx) in item.tags.slice(0, 8)" :key="idx" 
-                          class="inline-flex items-center text-xs px-2 py-0.5 rounded-full border border-cyber-blue/40 bg-cyber-blue/10 text-cyber-blue hover:bg-cyber-blue/20 transition-colors">
-                      {{ tag }}
-                    </span>
-                    <span v-if="item.tags.length > 8" 
-                          class="text-xs px-2 py-0.5 rounded-full border border-gray-600 text-gray-400">
-                      +{{ item.tags.length - 8 }}
-                    </span>
+                  <!-- 高亮显示匹配的词 -->
+                  <div v-if="item.rawTags" class="text-xs text-gray-300 leading-relaxed">
+                    <span v-html="highlightText(item.rawTags)"></span>
                   </div>
                   <div v-else class="text-xs text-gray-500 italic">点击添加标签...</div>
                 </div>
@@ -369,7 +363,8 @@ export default {
     
     displayItems() {
       if (this.selectedTag) {
-        return this.items.filter(item => item.tags.includes(this.selectedTag))
+        // 使用子串匹配，因为标签是共同短语
+        return this.items.filter(item => item.rawTags && item.rawTags.includes(this.selectedTag))
       }
       return this.items
     },
@@ -715,6 +710,33 @@ export default {
       
       this.editingCardId = null
       this.editingCardTags = ''
+    },
+    
+    // 高亮显示选中的标签/短语
+    highlightText(text) {
+      if (!text) return ''
+      if (!this.selectedTag) {
+        // 没有选中标签时，直接返回转义后的文本
+        return this.escapeHtml(text)
+      }
+      
+      // 转义HTML特殊字符
+      const escapedText = this.escapeHtml(text)
+      const escapedTag = this.escapeHtml(this.selectedTag)
+      
+      // 使用正则进行全局替换，高亮所有匹配项
+      const regex = new RegExp(this.escapeRegex(escapedTag), 'gi')
+      return escapedText.replace(regex, '<mark class="highlight-tag">$&</mark>')
+    },
+    
+    escapeHtml(text) {
+      const div = document.createElement('div')
+      div.textContent = text
+      return div.innerHTML
+    },
+    
+    escapeRegex(string) {
+      return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     }
   }
 }

@@ -347,6 +347,26 @@ body {
   }
 }
 
+/* 高亮标签样式 */
+.highlight-tag {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.6), rgba(236, 72, 153, 0.6));
+  color: #fff;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-weight: bold;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+  animation: highlight-glow 1s ease-in-out infinite alternate;
+}
+
+@keyframes highlight-glow {
+  from {
+    box-shadow: 0 0 5px rgba(168, 85, 247, 0.5);
+  }
+  to {
+    box-shadow: 0 0 15px rgba(236, 72, 153, 0.8);
+  }
+}
+
 /* 响应式 */
 @media (max-width: 768px) {
   .grid-container {
